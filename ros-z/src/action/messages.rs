@@ -208,6 +208,18 @@ pub struct StatusMessage {
     pub status_list: Vec<GoalStatusInfo>,
 }
 
+impl crate::MessageTypeInfo for StatusMessage {
+    fn type_name() -> &'static str {
+        "action_msgs/msg/GoalStatusArray"
+    }
+
+    fn type_hash() -> crate::entity::TypeHash {
+        crate::entity::TypeHash::zero()
+    }
+}
+
+impl crate::WithTypeInfo for StatusMessage {}
+
 /// Status information for a single goal.
 ///
 /// Contains the goal info and current status.
@@ -226,14 +238,41 @@ impl<A: ZAction> crate::msg::ZService for GoalService<A> {
     type Response = GoalResponse;
 }
 
+impl<A: ZAction> crate::ServiceTypeInfo for GoalService<A> {
+    fn service_type_info() -> crate::entity::TypeInfo {
+        crate::entity::TypeInfo::new(
+            &format!("{}/_action/SendGoal", A::name()),
+            crate::entity::TypeHash::zero(),
+        )
+    }
+}
+
 pub struct ResultService<A: ZAction>(PhantomData<A>);
 impl<A: ZAction> crate::msg::ZService for ResultService<A> {
     type Request = ResultRequest;
     type Response = ResultResponse<A>;
 }
 
+impl<A: ZAction> crate::ServiceTypeInfo for ResultService<A> {
+    fn service_type_info() -> crate::entity::TypeInfo {
+        crate::entity::TypeInfo::new(
+            &format!("{}/_action/GetResult", A::name()),
+            crate::entity::TypeHash::zero(),
+        )
+    }
+}
+
 pub struct CancelService;
 impl crate::msg::ZService for CancelService {
     type Request = CancelGoalRequest;
     type Response = CancelGoalResponse;
+}
+
+impl crate::ServiceTypeInfo for CancelService {
+    fn service_type_info() -> crate::entity::TypeInfo {
+        crate::entity::TypeInfo::new(
+            "action_msgs/srv/CancelGoal",
+            crate::entity::TypeHash::zero(),
+        )
+    }
 }

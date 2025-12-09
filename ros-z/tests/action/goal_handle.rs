@@ -38,7 +38,7 @@ impl ZAction for TestAction {
 async fn setup_test() -> Result<(
     ros_z::node::ZNode,
     ros_z::action::client::ZActionClient<TestAction>,
-    std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+    ros_z::action::server::ZActionServer<TestAction>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
     let node = ctx.create_node("test_goal_handle_node").build()?;
@@ -62,7 +62,6 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server handler not receiving goals. Needs investigation of with_handler pattern and Zenoh discovery timing"]
     async fn test_goal_handle_creation() -> Result<()> {
         let (_node, client, server) = setup_test().await?;
 
@@ -126,7 +125,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server handler not receiving goals. Needs investigation of with_handler pattern and Zenoh discovery timing"]
     async fn test_goal_handle_feedback() -> Result<()> {
         let (_node, client, server) = setup_test().await?;
 
@@ -172,7 +170,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server handler not receiving goals. Needs investigation of with_handler pattern and Zenoh discovery timing"]
     async fn test_goal_handle_cancellation() -> Result<()> {
         let (_node, client, server) = setup_test().await?;
 
@@ -205,7 +202,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server handler not receiving goals. Needs investigation of with_handler pattern and Zenoh discovery timing"]
     async fn test_goal_handle_unique_ids() -> Result<()> {
         let (_node, client, server) = setup_test().await?;
 

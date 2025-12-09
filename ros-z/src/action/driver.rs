@@ -6,7 +6,7 @@
 
 use std::future::Future;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use tokio_util::sync::CancellationToken;
 use zenoh::Wait;
@@ -16,36 +16,8 @@ use crate::msg::ZMessage;
 
 use super::ZAction;
 use super::messages::*;
-use super::server::{ZActionServer, GoalHandle, Requested, Executing};
+use super::server::{InnerServer, ZActionServer, GoalHandle, Requested, Executing};
 use super::state::ServerGoalState;
-
-/// Runs a minimal driver loop that only handles result requests.
-///
-/// This allows manual handling of goals via recv_goal() while automatically
-/// serving result requests.
-pub async fn run_result_handler_loop<A: ZAction>(
-    server: Arc<ZActionServer<A>>,
-    shutdown: CancellationToken,
-) {
-    tracing::debug!("Action Server Result Handler Started");
-
-    loop {
-        tokio::select! {
-            _ = shutdown.cancelled() => {
-                tracing::info!("Shutdown signal received. Stopping result handler.");
-                break;
-            }
-
-            res = server.result_server.rx.recv_async() => {
-                if let Ok(query) = res {
-                    handle_result_request(&server, query).await;
-                }
-            }
-        }
-    }
-
-    tracing::debug!("Action Server Result Handler Stopped");
-}
 
 /// Runs the unified driver loop for an action server with automatic goal handling.
 ///
@@ -54,11 +26,11 @@ pub async fn run_result_handler_loop<A: ZAction>(
 ///
 /// # Arguments
 ///
-/// * `server` - The action server to drive
+/// * `weak_inner` - Weak reference to the inner server state
 /// * `shutdown` - Cancellation token to stop the driver loop
 /// * `handler` - Callback to execute goals automatically
-pub async fn run_driver_loop<A, F, Fut>(
-    server: Arc<ZActionServer<A>>,
+pub(crate) async fn run_driver_loop<A, F, Fut>(
+    weak_inner: Weak<InnerServer<A>>,
     shutdown: CancellationToken,
     handler: F,
 ) where
@@ -67,6 +39,12 @@ pub async fn run_driver_loop<A, F, Fut>(
     Fut: Future<Output = ()> + Send + 'static,
 {
     tracing::debug!("Action Server Driver Loop Started");
+
+    // Try to upgrade the weak reference once at the start
+    let Some(inner) = weak_inner.upgrade() else {
+        tracing::debug!("Server already dropped, not starting driver loop");
+        return;
+    };
 
     loop {
         tokio::select! {
@@ -77,23 +55,23 @@ pub async fn run_driver_loop<A, F, Fut>(
             }
 
             // 2. New Goal Requests
-            res = server.goal_server.rx.recv_async() => {
+            res = inner.goal_server.rx.recv_async() => {
                 if let Ok(query) = res {
-                    handle_goal_request(&server, query, &handler).await;
+                    handle_goal_request(&inner, query, &handler).await;
                 }
             }
 
             // 3. Cancel Requests
-            res = server.cancel_server.rx.recv_async() => {
+            res = inner.cancel_server.rx.recv_async() => {
                 if let Ok(query) = res {
-                    handle_cancel_request(&server, query).await;
+                    handle_cancel_request(&inner, query).await;
                 }
             }
 
             // 4. Result Requests
-            res = server.result_server.rx.recv_async() => {
+            res = inner.result_server.rx.recv_async() => {
                 if let Ok(query) = res {
-                    handle_result_request(&server, query).await;
+                    handle_result_request(&inner, query).await;
                 }
             }
         }
@@ -104,7 +82,7 @@ pub async fn run_driver_loop<A, F, Fut>(
 
 /// Handles incoming goal requests.
 async fn handle_goal_request<A, F, Fut>(
-    server: &Arc<ZActionServer<A>>,
+    inner: &Arc<InnerServer<A>>,
     query: zenoh::query::Query,
     handler: &F,
 ) where
@@ -116,10 +94,14 @@ async fn handle_goal_request<A, F, Fut>(
     let payload = query.payload().unwrap().to_bytes();
     let request = <GoalRequest<A> as ZMessage>::deserialize(&payload);
 
+    // Create a temporary ZActionServer handle for the goal handle
+    // This is safe because we're just passing it to the goal handler
+    let server = ZActionServer::from_inner(Arc::clone(inner));
+
     let requested = GoalHandle {
         goal: request.goal,
         info: super::GoalInfo::new(request.goal_id),
-        server: Arc::clone(server),
+        server,
         query: Some(query),
         cancel_flag: None,
         _state: PhantomData::<Requested>,
@@ -135,7 +117,7 @@ async fn handle_goal_request<A, F, Fut>(
 
 /// Handles incoming cancel requests.
 async fn handle_cancel_request<A: ZAction>(
-    server: &Arc<ZActionServer<A>>,
+    inner: &Arc<InnerServer<A>>,
     query: zenoh::query::Query,
 ) {
     tracing::debug!("Received cancel request");
@@ -143,7 +125,14 @@ async fn handle_cancel_request<A: ZAction>(
     let request = <CancelGoalRequest as ZMessage>::deserialize(&payload);
 
     // Mark goal as canceling using the atomic flag
-    let cancelled = server.request_cancel(request.goal_info.goal_id);
+    let cancelled = inner.goal_manager.read(|manager| {
+        if let Some(ServerGoalState::Executing { cancel_flag, .. }) = manager.goals.get(&request.goal_info.goal_id) {
+            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    });
 
     // Send response
     let response = CancelGoalResponse {
@@ -166,7 +155,7 @@ async fn handle_cancel_request<A: ZAction>(
 
 /// Handles incoming result requests.
 async fn handle_result_request<A: ZAction>(
-    server: &Arc<ZActionServer<A>>,
+    inner: &Arc<InnerServer<A>>,
     query: zenoh::query::Query,
 ) {
     tracing::debug!("Received result request");
@@ -174,7 +163,7 @@ async fn handle_result_request<A: ZAction>(
     let request = <ResultRequest as ZMessage>::deserialize(&payload);
 
     // Look up goal result - extract data while holding lock, then release
-    let result_data = server.goal_manager.read(|manager| {
+    let result_data = inner.goal_manager.read(|manager| {
         if let Some(ServerGoalState::Terminated { result, status, .. }) =
             manager.goals.get(&request.goal_id)
         {

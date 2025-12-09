@@ -50,7 +50,7 @@ async fn setup_test_with_client_server() -> Result<(
     ros_z::node::ZNode,
     ros_z::node::ZNode,
     std::sync::Arc<ros_z::action::client::ZActionClient<TestAction>>,
-    std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+    ros_z::action::server::ZActionServer<TestAction>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
 
@@ -135,7 +135,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - wait test needs investigation"]
     async fn test_action_server_async_wait() -> Result<()> {
         let (_client_node, _server_node, _client, server) = setup_test_with_client_server().await?;
 
@@ -150,7 +149,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - concurrent async operations test needs investigation"]
     async fn test_concurrent_async_operations() -> Result<()> {
         let (_client_node, _server_node, client, server) = setup_test_with_client_server().await?;
 
@@ -185,7 +183,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - wait test needs investigation"]
     async fn test_action_status_async_wait() -> Result<()> {
         let (_client_node, _server_node, client, server) = setup_test_with_client_server().await?;
 

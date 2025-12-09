@@ -44,7 +44,7 @@ async fn setup_test() -> Result<(
     ros_z::context::ZContext,
     ros_z::node::ZNode,
     ros_z::action::client::ZActionClient<TestAction>,
-    std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+    ros_z::action::server::ZActionServer<TestAction>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
     let node = ctx.create_node("test_action_comm_node").build()?;
@@ -73,7 +73,6 @@ mod tests {
     /// C++ equivalent: test_action_communication.cpp:182
     /// Tests basic goal request/response communication
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "Timing out - needs investigation"]
     async fn test_valid_goal_comm() -> Result<()> {
         let (_ctx, _node, client, server) = setup_test().await?;
 

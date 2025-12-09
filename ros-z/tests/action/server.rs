@@ -43,7 +43,7 @@ mod tests {
     async fn setup_test() -> Result<(
         ros_z::node::ZNode,
         ros_z::action::client::ZActionClient<TestAction>,
-        std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+        ros_z::action::server::ZActionServer<TestAction>,
     )> {
         let ctx = ZContextBuilder::default().build()?;
         let node = ctx.create_node("test_action_server_node").build()?;
@@ -60,7 +60,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server test needs investigation"]
     async fn test_action_server_init_fini() -> Result<()> {
         let ctx = ZContextBuilder::default().build()?;
         let node = ctx.create_node("test_action_server_node").build()?;
@@ -78,7 +77,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server test needs investigation"]
     async fn test_action_server_is_valid() -> Result<()> {
         let (_node, _client, _server) = setup_test().await?;
 
@@ -180,7 +178,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server test needs investigation"]
     async fn test_action_server_goal_timeout_configuration() -> Result<()> {
         use std::time::Duration;
 
@@ -199,7 +196,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - server test needs investigation"]
     async fn test_action_server_qos_configuration() -> Result<()> {
         let ctx = ZContextBuilder::default().build()?;
         let node = ctx.create_node("test_qos_node").build()?;

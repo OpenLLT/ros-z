@@ -127,14 +127,22 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         let status_topic_name = format!("{}/_action/status", qualified_action_name);
 
         // Create goal client using node API for proper graph registration
-        let mut goal_client_builder = self.node.create_client_impl::<GoalService<A>>(&goal_service_name, None);
+        let goal_type_info = Some(crate::entity::TypeInfo::new(
+            &format!("{}/_action/SendGoal", A::name()),
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut goal_client_builder = self.node.create_client_impl::<GoalService<A>>(&goal_service_name, goal_type_info);
         if let Some(qos) = self.goal_service_qos {
             goal_client_builder.entity.qos = qos;
         }
         let goal_client = goal_client_builder.build()?;
 
         // Create result client using node API for proper graph registration
-        let mut result_client_builder = self.node.create_client_impl::<ResultService<A>>(&result_service_name, None);
+        let result_type_info = Some(crate::entity::TypeInfo::new(
+            &format!("{}/_action/GetResult", A::name()),
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut result_client_builder = self.node.create_client_impl::<ResultService<A>>(&result_service_name, result_type_info);
         if let Some(qos) = self.result_service_qos {
             result_client_builder.entity.qos = qos;
         }
@@ -142,7 +150,11 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         tracing::debug!("Created result client for: {}", result_service_name);
 
         // Create cancel client using node API for proper graph registration
-        let mut cancel_client_builder = self.node.create_client_impl::<CancelService>(&cancel_service_name, None);
+        let cancel_type_info = Some(crate::entity::TypeInfo::new(
+            "action_msgs/srv/CancelGoal",
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut cancel_client_builder = self.node.create_client_impl::<CancelService>(&cancel_service_name, cancel_type_info);
         if let Some(qos) = self.cancel_service_qos {
             cancel_client_builder.entity.qos = qos;
         }
@@ -176,7 +188,11 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         tracing::debug!("Feedback subscriber created successfully");
 
         // Create status subscriber with callback for direct message routing
-        let mut status_sub_builder = self.node.create_sub_impl::<StatusMessage>(&status_topic_name, None);
+        let status_type_info = Some(crate::entity::TypeInfo::new(
+            "action_msgs/msg/GoalStatusArray",
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut status_sub_builder = self.node.create_sub_impl::<StatusMessage>(&status_topic_name, status_type_info);
         if let Some(qos) = self.status_topic_qos {
             status_sub_builder.entity.qos = qos;
         }

@@ -17,7 +17,7 @@ pub mod utils;
 
 pub use attachment::GidArray;
 pub use entity::{TypeHash, TypeInfo};
-pub use ros_msg::{MessageTypeInfo, ServiceTypeInfo, WithTypeInfo};
+pub use ros_msg::{ActionTypeInfo, MessageTypeInfo, ServiceTypeInfo, WithTypeInfo};
 pub use zenoh::Result;
 
 pub trait Builder {

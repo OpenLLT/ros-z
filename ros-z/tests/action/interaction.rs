@@ -35,7 +35,7 @@ async fn setup_multiple_clients_single_server(
     num_clients: usize,
 ) -> Result<(
     ros_z::node::ZNode,
-    std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+    ros_z::action::server::ZActionServer<TestAction>,
     Vec<ros_z::action::client::ZActionClient<TestAction>>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
@@ -65,7 +65,7 @@ async fn setup_single_client_multiple_servers(
 ) -> Result<(
     ros_z::node::ZNode,
     ros_z::action::client::ZActionClient<TestAction>,
-    Vec<std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>>,
+    Vec<ros_z::action::server::ZActionServer<TestAction>>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
     let node = ctx.create_node("test_interaction_node").build()?;
@@ -93,7 +93,6 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - complex interaction test needs investigation"]
     async fn test_multiple_clients_single_server() -> Result<()> {
         let (_node, server, clients) = setup_multiple_clients_single_server(3).await?;
 
@@ -131,7 +130,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - complex interaction test needs investigation"]
     async fn test_single_client_multiple_servers() -> Result<()> {
         let (_node, _client, servers) = setup_single_client_multiple_servers(2).await?;
 
@@ -155,7 +153,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - priority handling test needs investigation"]
     async fn test_goal_priority_handling() -> Result<()> {
         let (_node, server, mut clients) = setup_multiple_clients_single_server(2).await?;
 

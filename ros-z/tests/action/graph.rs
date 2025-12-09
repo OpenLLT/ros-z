@@ -50,7 +50,7 @@ async fn setup_test_with_client_server() -> Result<(
     ros_z::node::ZNode,
     ros_z::node::ZNode,
     std::sync::Arc<ros_z::action::client::ZActionClient<TestAction>>,
-    std::sync::Arc<ros_z::action::server::ZActionServer<TestAction>>,
+    ros_z::action::server::ZActionServer<TestAction>,
 )> {
     let ctx = ZContextBuilder::default().build()?;
 
@@ -81,7 +81,6 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - graph discovery test needs investigation"]
     async fn test_action_graph_node_discovery() -> Result<()> {
         let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;
@@ -93,7 +92,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - graph discovery test needs investigation"]
     async fn test_action_client_server_discovery() -> Result<()> {
         let (_ctx, _client_node, _server_node, client, server) = setup_test_with_client_server().await?;
 
@@ -150,7 +148,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - graph introspection test needs investigation"]
     async fn test_action_graph_introspection_by_node() -> Result<()> {
         let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;
@@ -192,7 +189,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    #[ignore = "Timing out - graph introspection test needs investigation"]
     async fn test_action_graph_introspection_all() -> Result<()> {
         let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;

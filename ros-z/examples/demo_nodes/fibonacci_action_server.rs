@@ -111,9 +111,7 @@ fn main() -> Result<()> {
     let ctx = builder.build()?;
 
     // Run the server
-    let result = tokio::runtime::Runtime::new()
+    tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(run_fibonacci_action_server(ctx, None));
-
-    result
+        .block_on(run_fibonacci_action_server(ctx, None))
 }
