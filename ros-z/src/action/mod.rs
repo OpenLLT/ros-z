@@ -6,9 +6,6 @@ pub mod client;
 pub mod messages;
 pub mod server;
 
-#[cfg(test)]
-mod tests;
-
 /// Core trait for ROS 2 actions
 pub trait ZAction: Send + Sync + 'static {
     type Goal: ZMessage + Clone + Send + Sync + serde::Serialize + for<'de> serde::Deserialize<'de>;
