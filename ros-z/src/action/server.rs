@@ -222,15 +222,25 @@ impl<'a, A: ZAction> Builder for ZActionServerBuilder<'a, A> {
         ));
 
         let cancellation_token = CancellationToken::new();
+        let result_handler_token = CancellationToken::new();
 
-        // Spawn background task to handle result requests (preserving original behavior)
+        // Spawn background task to handle result requests (default mode for manual goal handling)
+        // This task will be cancelled if with_handler() is called
         let result_server_arc = Arc::new(result_server);
         let result_server_clone = result_server_arc.clone();
         let goal_manager_clone = goal_manager.clone();
-        let token_clone = cancellation_token.clone();
+        let global_shutdown = cancellation_token.clone();
+        let handler_token = result_handler_token.clone();
+
         tokio::spawn(async move {
+            // Run until EITHER global shutdown OR handler-specific cancellation
             tokio::select! {
-                _ = token_clone.cancelled() => {},
+                _ = global_shutdown.cancelled() => {
+                    tracing::debug!("Result handler stopping due to global shutdown");
+                },
+                _ = handler_token.cancelled() => {
+                    tracing::debug!("Result handler stopping - switching to full driver mode");
+                },
                 _ = handle_result_requests_legacy::<A>(result_server_clone, goal_manager_clone) => {},
             }
         });
@@ -245,6 +255,7 @@ impl<'a, A: ZAction> Builder for ZActionServerBuilder<'a, A> {
             status_pub: Arc::new(status_pub),
             goal_manager,
             _cancellation_token: cancellation_token,
+            result_handler_token,
         }))
     }
 }
@@ -257,6 +268,8 @@ pub struct ZActionServer<A: ZAction> {
     pub(crate) status_pub: Arc<crate::pubsub::ZPub<StatusMessage, <StatusMessage as ZMessage>::Serdes>>,
     pub(crate) goal_manager: Arc<SafeGoalManager<A>>,
     _cancellation_token: CancellationToken,
+    /// Token to cancel the default result handler when switching to full driver mode
+    result_handler_token: CancellationToken,
 }
 
 impl<A: ZAction> Clone for ZActionServer<A> {
@@ -269,6 +282,7 @@ impl<A: ZAction> Clone for ZActionServer<A> {
             status_pub: self.status_pub.clone(),
             goal_manager: self.goal_manager.clone(),
             _cancellation_token: self._cancellation_token.clone(),
+            result_handler_token: self.result_handler_token.clone(),
         }
     }
 }
@@ -390,16 +404,44 @@ impl<A: ZAction> ZActionServer<A> {
         Ok(())
     }
 
+    /// Attaches an automatic goal handler to the server.
+    ///
+    /// This method transitions the server from "manual mode" (where you call `recv_goal()`)
+    /// to "automatic mode" (where goals are handled by the provided callback).
+    ///
+    /// **Important**: This method cancels the default result-only handler and starts a full
+    /// driver loop that handles all protocol events (goals, cancels, results) automatically.
+    ///
+    /// # Arguments
+    ///
+    /// * `handler` - Callback function that will be invoked for each accepted goal
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ros_z::action::*;
+    /// # let server = todo!();
+    /// let _server = server.with_handler(|executing| async move {
+    ///     // Process the goal
+    ///     executing.succeed(result).unwrap();
+    /// });
+    /// ```
     pub fn with_handler<F, Fut>(self: Arc<Self>, handler: F) -> Arc<Self>
     where
         F: Fn(GoalHandle<A, Executing>) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
+        // 1. Stop the default result-only handler to avoid competing for result_server.rx
+        tracing::debug!("Cancelling default result handler to switch to full driver mode");
+        self.result_handler_token.cancel();
+
+        // 2. Start the full driver loop that handles all protocol events
         let server_clone = self.clone();
         let shutdown = self._cancellation_token.clone();
         tokio::spawn(async move {
             crate::action::driver::run_driver_loop(server_clone, shutdown, handler).await;
         });
+
         self
     }
 
