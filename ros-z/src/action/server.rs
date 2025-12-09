@@ -201,7 +201,12 @@ impl<'a, A: ZAction> Builder for ZActionServerBuilder<'a, A> {
         let cancel_server = cancel_server_builder.build()?;
 
         // Create feedback publisher using node API for proper graph registration
-        let mut feedback_pub_builder = self.node.create_pub_impl::<FeedbackMessage<A>>(&feedback_topic_name, None);
+        // Use action name as type info for graph introspection
+        let feedback_type_info = Some(crate::entity::TypeInfo::new(
+            &format!("{}/_FeedbackMessage", A::name()),
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut feedback_pub_builder = self.node.create_pub_impl::<FeedbackMessage<A>>(&feedback_topic_name, feedback_type_info);
         if let Some(qos) = self.feedback_topic_qos {
             feedback_pub_builder.entity.qos = qos;
         }

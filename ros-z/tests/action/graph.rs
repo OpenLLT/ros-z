@@ -46,6 +46,7 @@ async fn setup_test_base() -> Result<(ros_z::node::ZNode,)> {
 
 // Helper function to create test setup with client and server
 async fn setup_test_with_client_server() -> Result<(
+    ros_z::context::ZContext,
     ros_z::node::ZNode,
     ros_z::node::ZNode,
     std::sync::Arc<ros_z::action::client::ZActionClient<TestAction>>,
@@ -72,19 +73,7 @@ async fn setup_test_with_client_server() -> Result<(
     // Wait for graph discovery of action topics
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
-    // Debug: check what entities exist in the graph
-    let client_topics = client_node.graph.get_topic_names_and_types();
-    let server_topics = server_node.graph.get_topic_names_and_types();
-    eprintln!("Client node has {} topics", client_topics.len());
-    eprintln!("Server node has {} topics", server_topics.len());
-    for (name, typ) in &client_topics {
-        eprintln!("  Client topic: {} ({})", name, typ);
-    }
-    for (name, typ) in &server_topics {
-        eprintln!("  Server topic: {} ({})", name, typ);
-    }
-
-    Ok((client_node, server_node, client, server))
+    Ok((ctx, client_node, server_node, client, server))
 }
 
 #[cfg(test)]
@@ -94,7 +83,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[ignore = "Timing out - graph discovery test needs investigation"]
     async fn test_action_graph_node_discovery() -> Result<()> {
-        let (_client_node, _server_node, _client, _server) =
+        let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;
 
         // Test that nodes can be discovered in the graph
@@ -106,7 +95,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[ignore = "Timing out - graph discovery test needs investigation"]
     async fn test_action_client_server_discovery() -> Result<()> {
-        let (_client_node, _server_node, client, server) = setup_test_with_client_server().await?;
+        let (_ctx, _client_node, _server_node, client, server) = setup_test_with_client_server().await?;
 
         // Test that action clients and servers can discover each other
         // This would involve checking the graph for action-related entities
@@ -163,7 +152,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[ignore = "Timing out - graph introspection test needs investigation"]
     async fn test_action_graph_introspection_by_node() -> Result<()> {
-        let (_client_node, _server_node, _client, _server) =
+        let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;
 
         // Test getting action clients by node
@@ -205,7 +194,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[ignore = "Timing out - graph introspection test needs investigation"]
     async fn test_action_graph_introspection_all() -> Result<()> {
-        let (_client_node, _server_node, _client, _server) =
+        let (_ctx, _client_node, _server_node, _client, _server) =
             setup_test_with_client_server().await?;
 
         // Test getting all action names and types

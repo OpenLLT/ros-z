@@ -111,10 +111,6 @@ pub enum EntityKind {
     Service,
     #[strum(serialize = "SC")]
     Client,
-    #[strum(serialize = "AS")]
-    ActionServer,
-    #[strum(serialize = "AC")]
-    ActionClient,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]

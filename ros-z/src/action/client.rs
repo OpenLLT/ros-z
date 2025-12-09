@@ -152,8 +152,13 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
             active_goals: DashMap::new(),
         });
 
-        // Create feedback subscriber with callback for direct message routing
-        let mut feedback_sub_builder = self.node.create_sub_impl::<FeedbackMessage<A>>(&feedback_topic_name, None);
+        // Create feedback subscriber with callback for proper graph registration
+        // Use action name as type info for graph introspection
+        let feedback_type_info = Some(crate::entity::TypeInfo::new(
+            &format!("{}/_FeedbackMessage", A::name()),
+            crate::entity::TypeHash::zero(),
+        ));
+        let mut feedback_sub_builder = self.node.create_sub_impl::<FeedbackMessage<A>>(&feedback_topic_name, feedback_type_info);
         if let Some(qos) = self.feedback_topic_qos {
             feedback_sub_builder.entity.qos = qos;
         }
