@@ -101,7 +101,7 @@ impl TestRouter {
         let port = NEXT_PORT.fetch_add(1, Ordering::SeqCst);
         let endpoint = format!("tcp/127.0.0.1:{}", port);
 
-        println!("🚀 Starting Zenoh router on port {}...", port);
+        println!("Starting Zenoh router on port {}...", port);
 
         // Create Zenoh router session programmatically
         let mut config = zenoh::Config::default();
@@ -115,7 +115,7 @@ impl TestRouter {
 
         // Wait for router to be ready
         thread::sleep(Duration::from_millis(500));
-        println!("✅ Zenoh router ready on {}", endpoint);
+        println!("Zenoh router ready on {}", endpoint);
 
         Self {
             port,

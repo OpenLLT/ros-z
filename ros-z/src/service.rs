@@ -150,14 +150,14 @@ where
             .payload(msg.serialize())
             .attachment(self.new_attchment())
             .callback(move |reply| {
-                tracing::trace!("🔵 ZClient received reply in callback");
+                tracing::trace!("ZClient received reply in callback");
                 match reply.into_result() {
                     Ok(sample) => {
-                        tracing::trace!("✅ ZClient reply OK, sending to channel");
+                        tracing::trace!("ZClient reply OK, sending to channel");
                         tx.send(sample);
                     }
                     Err(e) => {
-                        tracing::error!("❌ ZClient reply error: {:?}", e);
+                        tracing::error!("ZClient reply error: {:?}", e);
                     }
                 }
                 // let msg = <T::Response as ZMessage>::deserialize(&sample.payload().to_bytes());
@@ -245,7 +245,7 @@ where
             .declare_queryable(&key_expr)
             .complete(true)
             .callback(move |query| {
-                tracing::error!("🔥 RECEIVED QUERY: {}", &query.key_expr());
+                tracing::error!("RECEIVED QUERY: {}", &query.key_expr());
                 tracing::error!("   Selector: {}", &query.selector());
                 assert!(tx.send(query).is_ok());
             })

@@ -88,7 +88,7 @@ fn test_ros_z_server_ros_z_client() {
 
     let result = client_handle.join().expect("Client thread panicked");
     assert_eq!(result.sum, 8);
-    println!("✅ Test passed: ros-z service call successful");
+    println!("Test passed: ros-z service call successful");
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn test_ros_z_server_ros2_client() {
         stdout
     );
 
-    println!("✅ Test passed: ROS2 client called ros-z service");
+    println!("Test passed: ROS2 client called ros-z service");
 }
 
 #[test]
@@ -237,5 +237,5 @@ fn test_ros2_server_ros_z_client() {
 
     assert_eq!(result.sum, 24, "Expected 15 + 9 = 24");
 
-    println!("✅ Test passed: ros-z client called ROS2 service");
+    println!("Test passed: ros-z client called ROS2 service");
 }

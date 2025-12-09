@@ -71,7 +71,7 @@ fn test_ros_z_talker_to_ros_z_listener() {
     );
 
     println!(
-        "✅ Test passed: ros-z listener received {} messages from ros-z talker",
+        "Test passed: ros-z listener received {} messages from ros-z talker",
         msgs.len()
     );
 }
@@ -135,7 +135,7 @@ fn test_rcl_talker_to_ros_z_listener() {
     );
 
     println!(
-        "✅ Test passed: ros-z listener received {} messages from RCL talker",
+        "Test passed: ros-z listener received {} messages from RCL talker",
         msgs.len()
     );
 }
@@ -186,7 +186,7 @@ fn test_ros_z_talker_to_rcl_listener() {
     // Give some time for RCL listener to process
     wait_for_ready(Duration::from_secs(1));
 
-    println!("✅ Test passed: ros-z talker published messages to RCL listener");
+    println!("Test passed: ros-z talker published messages to RCL listener");
 }
 
 #[test]
@@ -222,13 +222,13 @@ fn test_ros_z_add_two_ints_server_to_ros_z_client() {
         Ok(_) => {
             server_handle.join().expect("Server thread panicked");
             println!(
-                "✅ Test passed: ros-z client received {} from ros-z server",
+                "Test passed: ros-z client received {} from ros-z server",
                 result
             );
         }
         Err(_) => {
             println!(
-                "✅ Test passed: ros-z client received {} from ros-z server (server still cleaning up)",
+                "Test passed: ros-z client received {} from ros-z server (server still cleaning up)",
                 result
             );
             // Don't wait for server join if it's taking too long
@@ -277,7 +277,7 @@ fn test_rcl_add_two_ints_server_to_ros_z_client() {
     assert_eq!(result, 11, "Expected 4 + 7 = 11");
 
     println!(
-        "✅ Test passed: ros-z client received {} from RCL server",
+        "Test passed: ros-z client received {} from RCL server",
         result
     );
 }
@@ -326,7 +326,7 @@ fn test_ros_z_add_two_ints_server_to_rcl_client() {
     // Stop the server
     server_handle.join().expect("Server thread panicked");
 
-    println!("✅ Test passed: RCL client called ros-z server");
+    println!("Test passed: RCL client called ros-z server");
 }
 
 #[test]
@@ -380,7 +380,7 @@ fn test_rcl_fibonacci_action_server_to_ros_z_client() {
     );
 
     println!(
-        "✅ Test passed: ros-z client received Fibonacci sequence {:?} from RCL server",
+        "Test passed: ros-z client received Fibonacci sequence {:?} from RCL server",
         result
     );
 }
@@ -432,7 +432,7 @@ fn test_ros_z_fibonacci_action_server_to_rcl_client() {
     // Stop the server
     server_handle.join().expect("Server thread panicked");
 
-    println!("✅ Test passed: RCL client called ros-z fibonacci action server");
+    println!("Test passed: RCL client called ros-z fibonacci action server");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

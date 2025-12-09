@@ -65,7 +65,7 @@ fn test_ros_z_pub_to_ros2_sub() {
     publisher_handle.join().expect("Publisher thread panicked");
     wait_for_ready(Duration::from_secs(2));
 
-    println!("✅ Test passed: ROS2 subscriber received message");
+    println!("Test passed: ROS2 subscriber received message");
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn test_ros2_pub_to_ros_z_sub() {
         "❌ Test failed: Did not receive message from ROS2"
     );
 
-    println!("✅ Test passed: Received message from ROS2");
+    println!("Test passed: Received message from ROS2");
 }
 
 // Add more pubsub tests...

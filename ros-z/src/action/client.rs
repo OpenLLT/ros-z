@@ -130,7 +130,7 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
             result_client_builder.entity.qos = qos;
         }
         let result_client = result_client_builder.build()?;
-        tracing::debug!("📞 Created result client for: {}", result_service_name);
+        tracing::debug!("Created result client for: {}", result_service_name);
 
         // Create cancel client using node API for proper graph registration
         let mut cancel_client_builder = self.node.create_client_impl::<CancelService>(&cancel_service_name, None);
@@ -149,18 +149,18 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         if let Some(qos) = self.feedback_topic_qos {
             feedback_sub_builder.entity.qos = qos;
         }
-        tracing::debug!("📡 Creating feedback subscriber with callback for {}", feedback_topic_name);
+        tracing::debug!("Creating feedback subscriber with callback for {}", feedback_topic_name);
         let goal_board_feedback = goal_board.clone();
         let feedback_sub = feedback_sub_builder.build_with_callback(move |msg: FeedbackMessage<A>| {
-            tracing::trace!("📥 Feedback callback received for goal {:?}", msg.goal_id);
+            tracing::trace!("Feedback callback received for goal {:?}", msg.goal_id);
             if let Some(channels) = goal_board_feedback.lock().unwrap().active_goals.get(&msg.goal_id) {
-                tracing::trace!("✅ Routing feedback to goal {:?}", msg.goal_id);
+                tracing::trace!("Routing feedback to goal {:?}", msg.goal_id);
                 let _ = channels.feedback_tx.send(msg.feedback);
             } else {
-                tracing::warn!("⚠️ No active goal found for feedback {:?}", msg.goal_id);
+                tracing::warn!("No active goal found for feedback {:?}", msg.goal_id);
             }
         })?;
-        tracing::debug!("✅ Feedback subscriber created successfully");
+        tracing::debug!("Feedback subscriber created successfully");
 
         // Create status subscriber with callback for direct message routing
         let mut status_sub_builder = self.node.create_sub_impl::<StatusMessage>(&status_topic_name, None);
@@ -169,13 +169,13 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         }
         let goal_board_status = goal_board.clone();
         let status_sub = status_sub_builder.build_with_callback(move |msg: StatusMessage| {
-            tracing::trace!("📥 Status callback received with {} statuses", msg.status_list.len());
+            tracing::trace!("Status callback received with {} statuses", msg.status_list.len());
             for status_info in msg.status_list {
                 if let Some(channels) = goal_board_status.lock().unwrap().active_goals.get(&status_info.goal_info.goal_id) {
-                    tracing::trace!("✅ Routing status {:?} to goal {:?}", status_info.status, status_info.goal_info.goal_id);
+                    tracing::trace!("Routing status {:?} to goal {:?}", status_info.status, status_info.goal_info.goal_id);
                     let _ = channels.status_tx.send(status_info.status);
                 } else {
-                    tracing::trace!("⚠️ No active goal found for status {:?}", status_info.goal_info.goal_id);
+                    tracing::trace!("No active goal found for status {:?}", status_info.goal_info.goal_id);
                 }
             }
         })?;

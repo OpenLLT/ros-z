@@ -1,8 +1,4 @@
-use ros_z::{
-    Builder, Result,
-    action::ZAction,
-    context::ZContext,
-};
+use ros_z::{Builder, Result, action::ZAction, context::ZContext};
 use ros_z_msgs::example_interfaces::{FibonacciFeedback, FibonacciGoal, FibonacciResult};
 
 // Define the Fibonacci action using standard ROS2 messages
@@ -28,9 +24,14 @@ pub async fn run_fibonacci_action_client(ctx: ZContext, order: i32) -> Result<Ve
     let node = ctx.create_node("fibonacci_action_client").build()?;
 
     // Create an action client
-    let client = node.create_action_client::<FibonacciAction>("fibonacci").build()?;
+    let client = node
+        .create_action_client::<FibonacciAction>("fibonacci")
+        .build()?;
 
-    println!("Fibonacci action client started, sending goal with order {}", order);
+    println!(
+        "Fibonacci action client started, sending goal with order {}",
+        order
+    );
 
     // Send the goal
     let mut goal_handle = client.send_goal(FibonacciGoal { order }).await?;

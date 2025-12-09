@@ -184,7 +184,7 @@ impl<'a, A: ZAction> Builder for ZActionServerBuilder<'a, A> {
             result_server_builder.entity.qos = qos;
         }
         let result_server = result_server_builder.build()?;
-        tracing::debug!("📡 Created result server for: {}", result_service_name);
+        tracing::debug!("Created result server for: {}", result_service_name);
 
         // Create cancel server using node API for proper graph registration
         let mut cancel_server_builder = self.node.create_service_impl::<CancelService>(&cancel_service_name, None);
