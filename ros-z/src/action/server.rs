@@ -4,8 +4,8 @@
 //! allowing nodes to accept goals from action clients, execute them,
 //! provide feedback, and return results.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::marker::PhantomData;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,7 @@ use crate::{Builder};
 use super::ZAction;
 use super::messages::*;
 use super::{GoalId, GoalInfo, GoalStatus};
+use super::state::{SafeGoalManager, ServerGoalState};
 
 /// Builder for creating an action server.
 ///
@@ -114,7 +115,7 @@ impl<'a, A: ZAction> ZActionServerBuilder<'a, A> {
 // Legacy result handler to preserve original behavior
 async fn handle_result_requests_legacy<A: ZAction>(
     result_server: Arc<crate::service::ZServer<ResultService<A>>>,
-    goal_manager: Arc<Mutex<GoalManager<A>>>,
+    goal_manager: Arc<SafeGoalManager<A>>,
 ) {
     loop {
         if let Ok(query) = result_server.rx.recv_async().await {
@@ -123,8 +124,7 @@ async fn handle_result_requests_legacy<A: ZAction>(
             let request = <ResultRequest as ZMessage>::deserialize(&payload);
 
             // Look up goal result - extract data while holding lock, then release
-            let result_data = {
-                let manager = goal_manager.lock().unwrap();
+            let result_data = goal_manager.read(|manager| {
                 if let Some(ServerGoalState::Terminated { result, status, .. }) =
                     manager.goals.get(&request.goal_id)
                 {
@@ -132,7 +132,7 @@ async fn handle_result_requests_legacy<A: ZAction>(
                 } else {
                     None
                 }
-            }; // Lock released here
+            }); // Lock released here
 
             if let Some((result, status)) = result_data {
                 tracing::debug!("Goal {:?} is terminated with status {:?}", request.goal_id, status);
@@ -216,11 +216,10 @@ impl<'a, A: ZAction> Builder for ZActionServerBuilder<'a, A> {
         status_pub_builder.with_attachment = false;
         let status_pub = status_pub_builder.build()?;
 
-        let goal_manager = Arc::new(Mutex::new(GoalManager {
-            goals: HashMap::new(),
-            result_timeout: self.result_timeout,
-            goal_timeout: self.goal_timeout,
-        }));
+        let goal_manager = Arc::new(SafeGoalManager::new(
+            self.result_timeout,
+            self.goal_timeout,
+        ));
 
         let cancellation_token = CancellationToken::new();
 
@@ -256,7 +255,7 @@ pub struct ZActionServer<A: ZAction> {
     pub(crate) cancel_server: Arc<crate::service::ZServer<CancelService>>,
     pub(crate) feedback_pub: Arc<crate::pubsub::ZPub<FeedbackMessage<A>, <FeedbackMessage<A> as ZMessage>::Serdes>>,
     pub(crate) status_pub: Arc<crate::pubsub::ZPub<StatusMessage, <StatusMessage as ZMessage>::Serdes>>,
-    pub(crate) goal_manager: Arc<Mutex<GoalManager<A>>>,
+    pub(crate) goal_manager: Arc<SafeGoalManager<A>>,
     _cancellation_token: CancellationToken,
 }
 
@@ -283,8 +282,7 @@ impl<A: ZAction> Drop for ZActionServer<A> {
 impl<A: ZAction> ZActionServer<A> {
     fn publish_status(&self) {
         // Build status list while holding lock, then release before publishing
-        let status_list: Vec<GoalStatusInfo> = {
-            let manager = self.goal_manager.lock().unwrap();
+        let status_list: Vec<GoalStatusInfo> = self.goal_manager.read(|manager| {
             manager.goals.iter().map(|(goal_id, state)| {
                 let status = match state {
                     ServerGoalState::Accepted { .. } => GoalStatus::Accepted,
@@ -297,23 +295,25 @@ impl<A: ZAction> ZActionServer<A> {
                     status,
                 }
             }).collect()
-        }; // Lock released here
+        }); // Lock released here
 
         // Publish without holding lock
         let msg = StatusMessage { status_list };
         let _ = self.status_pub.publish(&msg);
     }
 
-    pub async fn recv_goal(self: &Arc<Self>) -> Result<RequestedGoal<A>> {
+    pub async fn recv_goal(self: &Arc<Self>) -> Result<GoalHandle<A, Requested>> {
         let query = self.goal_server.rx.recv_async().await?;
         let payload = query.payload().unwrap().to_bytes();
         let request = <GoalRequest<A> as ZMessage>::deserialize(&payload);
 
-        Ok(RequestedGoal {
+        Ok(GoalHandle {
             goal: request.goal,
             info: GoalInfo::new(request.goal_id),
             server: Arc::clone(self),
-            query,
+            query: Some(query),
+            cancel_flag: None,
+            _state: PhantomData,
         })
     }
 
@@ -331,13 +331,14 @@ impl<A: ZAction> ZActionServer<A> {
     /// Marks a goal as canceling by setting its atomic cancel flag.
     /// This is a lock-free operation that can be called from any thread.
     pub fn request_cancel(&self, goal_id: GoalId) -> bool {
-        let manager = self.goal_manager.lock().unwrap();
-        if let Some(ServerGoalState::Executing { cancel_flag, .. }) = manager.goals.get(&goal_id) {
-            cancel_flag.store(true, Ordering::Relaxed);
-            true
-        } else {
-            false
-        }
+        self.goal_manager.read(|manager| {
+            if let Some(ServerGoalState::Executing { cancel_flag, .. }) = manager.goals.get(&goal_id) {
+                cancel_flag.store(true, Ordering::Relaxed);
+                true
+            } else {
+                false
+            }
+        })
     }
 
     pub async fn recv_result_request(&self) -> Result<(GoalId, zenoh::query::Query)> {
@@ -391,7 +392,7 @@ impl<A: ZAction> ZActionServer<A> {
 
     pub fn with_handler<F, Fut>(self: Arc<Self>, handler: F) -> Arc<Self>
     where
-        F: Fn(ExecutingGoal<A>) -> Fut + Send + Sync + 'static,
+        F: Fn(GoalHandle<A, Executing>) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let server_clone = self.clone();
@@ -427,23 +428,25 @@ impl<A: ZAction> ZActionServer<A> {
     /// println!("Expired {} goals", expired.len());
     /// ```
     pub fn expire_goals(&self, max_age: Duration) -> Vec<GoalId> {
-        let mut manager = self.goal_manager.lock().unwrap();
-        let now = Instant::now();
-        let mut expired = Vec::new();
+        let expired = self.goal_manager.modify(|manager| {
+            let now = Instant::now();
+            let mut expired = Vec::new();
 
-        // Find terminated goals older than max_age
-        manager.goals.retain(|goal_id, state| {
-            if let ServerGoalState::Terminated { timestamp, .. } = state
-                && now.duration_since(*timestamp) > max_age {
-                    expired.push(*goal_id);
-                    return false; // Remove this goal
-                }
-            true // Keep this goal
-        });
+            // Find terminated goals older than max_age
+            manager.goals.retain(|goal_id, state| {
+                if let ServerGoalState::Terminated { timestamp, .. } = state
+                    && now.duration_since(*timestamp) > max_age {
+                        expired.push(*goal_id);
+                        return false; // Remove this goal
+                    }
+                true // Keep this goal
+            });
+
+            expired
+        }); // Lock released here
 
         // Publish updated status if any goals were expired
         if !expired.is_empty() {
-            drop(manager); // Release lock before publishing
             self.publish_status();
         }
 
@@ -469,8 +472,9 @@ impl<A: ZAction> ZActionServer<A> {
     /// server.set_result_timeout(Duration::from_secs(30));
     /// ```
     pub fn set_result_timeout(&self, timeout: Duration) {
-        let mut manager = self.goal_manager.lock().unwrap();
-        manager.result_timeout = timeout;
+        self.goal_manager.modify(|manager| {
+            manager.result_timeout = timeout;
+        });
     }
 
     /// Gets the current result timeout for this server.
@@ -479,47 +483,97 @@ impl<A: ZAction> ZActionServer<A> {
     ///
     /// The result timeout duration
     pub fn result_timeout(&self) -> Duration {
-        let manager = self.goal_manager.lock().unwrap();
-        manager.result_timeout
+        self.goal_manager.read(|manager| manager.result_timeout)
     }
 }
 
-pub(crate) struct GoalManager<A: ZAction> {
-    pub(crate) goals: HashMap<GoalId, ServerGoalState<A>>,
-    pub(crate) result_timeout: Duration,
-    pub(crate) goal_timeout: Option<Duration>,
-}
+// --- State Markers for Type-State Pattern ---
+/// Marker type representing a goal that has been requested but not yet accepted or rejected.
+pub struct Requested;
 
-// TODO: check this dead_code
-#[allow(dead_code)]
-pub(crate) enum ServerGoalState<A: ZAction> {
-    Accepted { goal: A::Goal, timestamp: Instant, expires_at: Option<Instant> },
-    Executing { goal: A::Goal, cancel_flag: Arc<AtomicBool>, expires_at: Option<Instant> },
-    Canceling { goal: A::Goal },
-    Terminated { result: A::Result, status: GoalStatus, timestamp: Instant },
-}
+/// Marker type representing a goal that has been accepted but not yet executing.
+pub struct Accepted;
 
-// Type-state pattern for goal lifecycle
-pub struct RequestedGoal<A: ZAction> {
+/// Marker type representing a goal that is currently executing.
+pub struct Executing;
+
+// Type aliases for convenience
+/// A goal handle in the "Requested" state.
+pub type RequestedGoal<A> = GoalHandle<A, Requested>;
+
+/// A goal handle in the "Accepted" state.
+pub type AcceptedGoal<A> = GoalHandle<A, Accepted>;
+
+/// A goal handle in the "Executing" state.
+pub type ExecutingGoal<A> = GoalHandle<A, Executing>;
+
+// Type-state pattern for goal lifecycle with PhantomData markers
+/// A type-safe goal handle that uses compile-time state tracking.
+///
+/// The `GoalHandle` is generic over the action type `A` and the state `State`.
+/// Different methods are available depending on the current state, enforced at compile time.
+///
+/// # Type States
+///
+/// - `GoalHandle<A, Requested>`: Can be accepted or rejected
+/// - `GoalHandle<A, Accepted>`: Can be executed
+/// - `GoalHandle<A, Executing>`: Can publish feedback and be terminated
+///
+/// # Examples
+///
+/// ```no_run
+/// # use ros_z::action::*;
+/// # let server: std::sync::Arc<server::ZActionServer<MyAction>> = todo!();
+/// # async {
+/// let requested = server.recv_goal().await?;
+/// let accepted = requested.accept();
+/// let executing = accepted.execute();
+/// executing.succeed(result)?;
+/// # Ok::<(), zenoh::Error>(())
+/// # };
+/// ```
+pub struct GoalHandle<A: ZAction, State> {
+    /// The goal data.
     pub goal: A::Goal,
+    /// The goal metadata.
     pub info: GoalInfo,
     pub(crate) server: Arc<ZActionServer<A>>,
-    pub(crate) query: zenoh::query::Query,
+    pub(crate) query: Option<zenoh::query::Query>,
+    pub(crate) cancel_flag: Option<Arc<AtomicBool>>,
+    pub(crate) _state: PhantomData<State>,
 }
 
-impl<A: ZAction> RequestedGoal<A> {
-    pub fn accept(self) -> AcceptedGoal<A> {
+// --- State-specific implementations ---
+
+/// Methods available only for goals in the "Requested" state.
+impl<A: ZAction> GoalHandle<A, Requested> {
+    /// Access the goal data.
+    pub fn goal(&self) -> &A::Goal {
+        &self.goal
+    }
+
+    /// Access the goal info.
+    pub fn info(&self) -> &GoalInfo {
+        &self.info
+    }
+
+    /// Accept this goal and transition to the "Accepted" state.
+    ///
+    /// This sends an acceptance response to the client and updates the server state.
+    pub fn accept(mut self) -> GoalHandle<A, Accepted> {
         // Send acceptance response
         let response = GoalResponse { accepted: true, stamp: self.info.stamp };
         let response_bytes = <GoalResponse as ZMessage>::serialize(&response);
-        let attachment: Attachment = self.query.attachment().unwrap().try_into().unwrap();
-        let _ = self.query.reply(self.query.key_expr().clone(), response_bytes)
-            .attachment(attachment)
-            .wait();
+
+        if let Some(query) = self.query.take() {
+            let attachment: Attachment = query.attachment().unwrap().try_into().unwrap();
+            let _ = query.reply(query.key_expr().clone(), response_bytes)
+                .attachment(attachment)
+                .wait();
+        }
 
         // Update server state to ACCEPTED
-        {
-            let mut manager = self.server.goal_manager.lock().unwrap();
+        self.server.goal_manager.modify(|manager| {
             let expires_at = manager.goal_timeout.map(|timeout| Instant::now() + timeout);
             manager.goals.insert(
                 self.info.goal_id,
@@ -529,44 +583,60 @@ impl<A: ZAction> RequestedGoal<A> {
                     expires_at,
                 },
             );
-        }
+        });
 
         // Publish status update
         self.server.publish_status();
 
-        AcceptedGoal {
+        GoalHandle {
             goal: self.goal,
             info: self.info,
             server: self.server,
+            query: None,
+            cancel_flag: None,
+            _state: PhantomData,
         }
     }
 
-    pub fn reject(self) -> Result<()> {
+    /// Reject this goal.
+    ///
+    /// This sends a rejection response to the client. The goal will not be executed.
+    pub fn reject(mut self) -> Result<()> {
         // Send rejection response
         let response = GoalResponse { accepted: false, stamp: 0 };
         let response_bytes = <GoalResponse as ZMessage>::serialize(&response);
-        let attachment: Attachment = self.query.attachment().unwrap().try_into().unwrap();
-        let _ = self.query.reply(self.query.key_expr().clone(), response_bytes)
-            .attachment(attachment)
-            .wait();
+
+        if let Some(query) = self.query.take() {
+            let attachment: Attachment = query.attachment().unwrap().try_into().unwrap();
+            let _ = query.reply(query.key_expr().clone(), response_bytes)
+                .attachment(attachment)
+                .wait();
+        }
         Ok(())
     }
 }
 
-pub struct AcceptedGoal<A: ZAction> {
-    pub goal: A::Goal,
-    pub info: GoalInfo,
-    server: Arc<ZActionServer<A>>,
-}
+/// Methods available only for goals in the "Accepted" state.
+impl<A: ZAction> GoalHandle<A, Accepted> {
+    /// Access the goal data.
+    pub fn goal(&self) -> &A::Goal {
+        &self.goal
+    }
 
-impl<A: ZAction> AcceptedGoal<A> {
-    pub fn execute(self) -> ExecutingGoal<A> {
+    /// Access the goal info.
+    pub fn info(&self) -> &GoalInfo {
+        &self.info
+    }
+
+    /// Begin executing this goal and transition to the "Executing" state.
+    ///
+    /// This updates the server state to executing and publishes a status update.
+    pub fn execute(self) -> GoalHandle<A, Executing> {
         // Create cancel flag
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
         // Transition to EXECUTING
-        {
-            let mut manager = self.server.goal_manager.lock().unwrap();
+        self.server.goal_manager.modify(|manager| {
             let expires_at = manager.goal_timeout.map(|timeout| Instant::now() + timeout);
             manager.goals.insert(
                 self.info.goal_id,
@@ -576,27 +646,37 @@ impl<A: ZAction> AcceptedGoal<A> {
                     expires_at,
                 },
             );
-        }
+        });
 
         self.server.publish_status();
 
-        ExecutingGoal {
+        GoalHandle {
             goal: self.goal,
             info: self.info,
             server: self.server,
-            cancel_flag,
+            query: None,
+            cancel_flag: Some(cancel_flag),
+            _state: PhantomData,
         }
     }
 }
 
-pub struct ExecutingGoal<A: ZAction> {
-    pub goal: A::Goal,
-    pub info: GoalInfo,
-    server: Arc<ZActionServer<A>>,
-    cancel_flag: Arc<AtomicBool>,
-}
+/// Methods available only for goals in the "Executing" state.
+impl<A: ZAction> GoalHandle<A, Executing> {
+    /// Access the goal data.
+    pub fn goal(&self) -> &A::Goal {
+        &self.goal
+    }
 
-impl<A: ZAction> ExecutingGoal<A> {
+    /// Access the goal info.
+    pub fn info(&self) -> &GoalInfo {
+        &self.info
+    }
+
+    /// Publish feedback for this goal.
+    ///
+    /// Feedback can be published multiple times during goal execution to inform
+    /// the client of progress.
     pub fn publish_feedback(&self, feedback: A::Feedback) -> Result<()> {
         let msg = FeedbackMessage {
             goal_id: self.info.goal_id,
@@ -605,25 +685,43 @@ impl<A: ZAction> ExecutingGoal<A> {
         self.server.feedback_pub.publish(&msg)
     }
 
+    /// Check if cancellation has been requested for this goal.
+    ///
+    /// This is a lock-free operation that can be called frequently from the
+    /// goal execution loop.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a cancel request has been received, `false` otherwise.
     pub fn is_cancel_requested(&self) -> bool {
-        self.cancel_flag.load(Ordering::Relaxed)
+        self.cancel_flag.as_ref()
+            .map(|flag| flag.load(Ordering::Relaxed))
+            .unwrap_or(false)
     }
 
+    /// Mark this goal as succeeded with the given result.
+    ///
+    /// This transitions the goal to a terminal state and consumes the handle.
     pub fn succeed(self, result: A::Result) -> Result<()> {
         self.terminate(result, GoalStatus::Succeeded)
     }
 
+    /// Mark this goal as aborted with the given result.
+    ///
+    /// This transitions the goal to a terminal state and consumes the handle.
     pub fn abort(self, result: A::Result) -> Result<()> {
         self.terminate(result, GoalStatus::Aborted)
     }
 
+    /// Mark this goal as canceled with the given result.
+    ///
+    /// This transitions the goal to a terminal state and consumes the handle.
     pub fn canceled(self, result: A::Result) -> Result<()> {
         self.terminate(result, GoalStatus::Canceled)
     }
 
     fn terminate(self, result: A::Result, status: GoalStatus) -> Result<()> {
-        {
-            let mut manager = self.server.goal_manager.lock().unwrap();
+        self.server.goal_manager.modify(|manager| {
             manager.goals.insert(
                 self.info.goal_id,
                 ServerGoalState::Terminated {
@@ -632,7 +730,7 @@ impl<A: ZAction> ExecutingGoal<A> {
                     timestamp: Instant::now(),
                 },
             );
-        } // Drop the lock before publishing status
+        }); // Drop the lock before publishing status
         self.server.publish_status();
         Ok(())
     }

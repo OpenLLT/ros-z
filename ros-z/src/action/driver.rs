@@ -5,6 +5,7 @@
 //! in a sequential, race-condition-free manner.
 
 use std::future::Future;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -15,7 +16,8 @@ use crate::msg::ZMessage;
 
 use super::ZAction;
 use super::messages::*;
-use super::server::{ZActionServer, ExecutingGoal};
+use super::server::{ZActionServer, GoalHandle, Requested, Executing};
+use super::state::ServerGoalState;
 
 /// Runs a minimal driver loop that only handles result requests.
 ///
@@ -61,7 +63,7 @@ pub async fn run_driver_loop<A, F, Fut>(
     handler: F,
 ) where
     A: ZAction,
-    F: Fn(ExecutingGoal<A>) -> Fut + Send + Sync + 'static,
+    F: Fn(GoalHandle<A, Executing>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     tracing::debug!("Action Server Driver Loop Started");
@@ -107,18 +109,20 @@ async fn handle_goal_request<A, F, Fut>(
     handler: &F,
 ) where
     A: ZAction,
-    F: Fn(ExecutingGoal<A>) -> Fut + Send + Sync + 'static,
+    F: Fn(GoalHandle<A, Executing>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     tracing::debug!("Received goal request");
     let payload = query.payload().unwrap().to_bytes();
     let request = <GoalRequest<A> as ZMessage>::deserialize(&payload);
 
-    let requested = super::server::RequestedGoal {
+    let requested = GoalHandle {
         goal: request.goal,
         info: super::GoalInfo::new(request.goal_id),
         server: Arc::clone(server),
-        query,
+        query: Some(query),
+        cancel_flag: None,
+        _state: PhantomData::<Requested>,
     };
 
     let accepted = requested.accept();
@@ -170,16 +174,15 @@ async fn handle_result_request<A: ZAction>(
     let request = <ResultRequest as ZMessage>::deserialize(&payload);
 
     // Look up goal result - extract data while holding lock, then release
-    let result_data = {
-        let manager = server.goal_manager.lock().unwrap();
-        if let Some(super::server::ServerGoalState::Terminated { result, status, .. }) =
+    let result_data = server.goal_manager.read(|manager| {
+        if let Some(ServerGoalState::Terminated { result, status, .. }) =
             manager.goals.get(&request.goal_id)
         {
             Some((result.clone(), *status))
         } else {
             None
         }
-    }; // Lock released here
+    }); // Lock released here
 
     if let Some((result, status)) = result_data {
         tracing::debug!("Goal {:?} is terminated with status {:?}", request.goal_id, status);
