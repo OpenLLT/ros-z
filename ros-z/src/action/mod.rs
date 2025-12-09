@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
 pub mod client;
+pub mod driver;
 pub mod messages;
 pub mod server;
+pub mod state;
 
 /// Core trait for ROS 2 actions
 pub trait ZAction: Send + Sync + 'static {
