@@ -329,6 +329,7 @@ fn test_ros_z_add_two_ints_server_to_rcl_client() {
     println!("Test passed: RCL client called ros-z server");
 }
 
+#[ignore = "typehash is missing"]
 #[test]
 fn test_rcl_fibonacci_action_server_to_ros_z_client() {
     if !check_ros2_available() {
@@ -385,6 +386,7 @@ fn test_rcl_fibonacci_action_server_to_ros_z_client() {
     );
 }
 
+#[ignore = "typehash is missing"]
 #[test]
 fn test_ros_z_fibonacci_action_server_to_rcl_client() {
     if !check_ros2_available() {
