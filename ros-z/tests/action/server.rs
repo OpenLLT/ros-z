@@ -128,7 +128,7 @@ mod tests {
         let (_node, client, server) = setup_test().await?;
 
         // Send and accept a goal
-        let mut goal_handle = client.send_goal(TestGoal { order: 10 }).await?;
+        let goal_handle = client.send_goal(TestGoal { order: 10 }).await?;
         let requested = server.recv_goal().await?;
         let accepted = requested.accept();
         let executing = accepted.execute();

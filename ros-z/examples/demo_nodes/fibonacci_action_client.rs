@@ -37,7 +37,7 @@ pub async fn run_fibonacci_action_client(ctx: ZContext, order: i32) -> Result<Ve
     let mut goal_handle = client.send_goal(FibonacciGoal { order }).await?;
 
     // Set up feedback monitoring
-    if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+    if let Some(mut feedback_stream) = goal_handle.feedback() {
         tokio::spawn(async move {
             while let Some(fb) = feedback_stream.recv().await {
                 println!("Feedback: {:?}", fb.sequence);

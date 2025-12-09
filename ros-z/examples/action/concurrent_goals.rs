@@ -146,7 +146,7 @@ async fn run_client() -> Result<()> {
             let mut goal_handle = client_clone.send_goal(goal.clone()).await.unwrap();
 
             // Monitor feedback
-            if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+            if let Some(mut feedback_stream) = goal_handle.feedback() {
                 tokio::spawn(async move {
                     while let Some(fb) = feedback_stream.recv().await {
                         println!("Task {} progress: {:.1}%", fb.task_id, fb.progress * 100.0);

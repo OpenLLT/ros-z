@@ -114,7 +114,7 @@ async fn run_client(target_count: i32) -> Result<()> {
         .await?;
 
     // Spawn task to monitor feedback
-    if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+    if let Some(mut feedback_stream) = goal_handle.feedback() {
         tokio::spawn(async move {
             while let Some(fb) = feedback_stream.recv().await {
                 println!("Feedback: current_count={}", fb.current_count);

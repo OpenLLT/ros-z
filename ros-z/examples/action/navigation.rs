@@ -153,7 +153,7 @@ async fn run_client(target_x: f64, target_y: f64) -> Result<()> {
         .await?;
 
     // Spawn task to monitor feedback
-    if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+    if let Some(mut feedback_stream) = goal_handle.feedback() {
         tokio::spawn(async move {
             while let Some(fb) = feedback_stream.recv().await {
                 println!(

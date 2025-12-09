@@ -74,7 +74,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Send goal and get handle
-        let mut goal_handle = client.send_goal(TestGoal { order: 10 }).await?;
+        let goal_handle = client.send_goal(TestGoal { order: 10 }).await?;
         let goal_id = goal_handle.id();
 
         // Verify goal handle has valid ID
@@ -147,7 +147,7 @@ mod tests {
         let mut goal_handle = client.send_goal(TestGoal { order: 10 }).await?;
 
         let mut feedback_values = Vec::new();
-        if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+        if let Some(mut feedback_stream) = goal_handle.feedback() {
             // Spawn task to collect feedback
             tokio::spawn(async move {
                 while let Some(fb) = feedback_stream.recv().await {
@@ -217,8 +217,8 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Send multiple goals and verify unique IDs
-        let mut goal_handle1 = client.send_goal(TestGoal { order: 10 }).await?;
-        let mut goal_handle2 = client.send_goal(TestGoal { order: 20 }).await?;
+        let goal_handle1 = client.send_goal(TestGoal { order: 10 }).await?;
+        let goal_handle2 = client.send_goal(TestGoal { order: 20 }).await?;
 
         let id1 = goal_handle1.id();
         let id2 = goal_handle2.id();

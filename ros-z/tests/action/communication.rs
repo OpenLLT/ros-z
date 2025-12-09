@@ -223,7 +223,7 @@ mod tests {
 
         // Send goal
         let goal = TestGoal { order: 10 };
-        let mut goal_handle = timeout(Duration::from_secs(5), client.send_goal(goal))
+        let goal_handle = timeout(Duration::from_secs(5), client.send_goal(goal))
             .await
             .expect("timeout sending goal")?;
 
@@ -285,7 +285,7 @@ mod tests {
 
         // Get feedback stream after goal is sent
         let mut feedback_rx = goal_handle
-            .feedback_stream()
+            .feedback()
             .expect("failed to get feedback stream");
 
         // Client receives feedback
@@ -428,7 +428,7 @@ mod tests {
         server_task.await.expect("server task failed")?;
 
         // Verify all results
-        for (i, mut handle) in goal_handles.into_iter().enumerate() {
+        for (i, handle) in goal_handles.into_iter().enumerate() {
             let result = timeout(Duration::from_secs(2), handle.result())
                 .await
                 .expect("timeout getting result")?;

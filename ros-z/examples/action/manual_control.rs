@@ -137,7 +137,7 @@ async fn run_client(target_value: i32) -> Result<()> {
     let mut goal_handle = client.send_goal(ManualGoal { target_value }).await?;
 
     // Monitor feedback
-    if let Some(mut feedback_stream) = goal_handle.feedback_stream() {
+    if let Some(mut feedback_stream) = goal_handle.feedback() {
         tokio::spawn(async move {
             while let Some(fb) = feedback_stream.recv().await {
                 println!("Feedback: current_value={}", fb.current_value);

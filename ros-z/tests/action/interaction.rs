@@ -112,7 +112,7 @@ mod tests {
             let client_clone = client.clone();
             let goal_order = (i + 1) as i32 * 10;
             let handle = tokio::spawn(async move {
-                let mut goal_handle = client_clone
+                let goal_handle = client_clone
                     .send_goal(TestGoal { order: goal_order })
                     .await
                     .unwrap();
@@ -175,7 +175,7 @@ mod tests {
         let low_priority_client = clients.remove(0);
 
         let high_priority_handle = tokio::spawn(async move {
-            let mut goal_handle = high_priority_client
+            let goal_handle = high_priority_client
                 .send_goal(TestGoal { order: 100 })
                 .await
                 .unwrap();
@@ -183,7 +183,7 @@ mod tests {
         });
 
         let low_priority_handle = tokio::spawn(async move {
-            let mut goal_handle = low_priority_client
+            let goal_handle = low_priority_client
                 .send_goal(TestGoal { order: 10 })
                 .await
                 .unwrap();

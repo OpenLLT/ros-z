@@ -118,7 +118,7 @@ mod tests {
             tokio::spawn(async move { run_server_with_timeout(server_clone, 100, 5000).await });
 
         let goal = TestGoal { order: 5 };
-        let mut goal_handle = client.send_goal(goal).await?;
+        let goal_handle = client.send_goal(goal).await?;
         let result = goal_handle.result().await?;
         assert_eq!(result.value, 100);
 
@@ -141,7 +141,7 @@ mod tests {
             tokio::spawn(async move { run_server_with_timeout(server_clone, 200, 5000).await });
 
         let goal = TestGoal { order: 10 };
-        let mut goal_handle = client.send_goal(goal).await?;
+        let goal_handle = client.send_goal(goal).await?;
         let result = goal_handle.result().await?;
         assert_eq!(result.value, 200);
 
@@ -200,7 +200,7 @@ mod tests {
         });
 
         let goal = TestGoal { order: 15 };
-        let mut goal_handle = client.send_goal(goal).await?;
+        let goal_handle = client.send_goal(goal).await?;
         let result = goal_handle.result().await?;
         assert_eq!(result.value, 300);
 
@@ -237,7 +237,7 @@ mod tests {
             tokio::spawn(async move { run_server_with_timeout(server_clone1, 400, 5000).await });
 
         let goal = TestGoal { order: 20 };
-        let mut goal_handle = client1.send_goal(goal).await?;
+        let goal_handle = client1.send_goal(goal).await?;
         let result = goal_handle.result().await?;
         assert_eq!(result.value, 400);
 
@@ -259,7 +259,7 @@ mod tests {
             tokio::spawn(async move { run_server_with_timeout(server_clone2, 500, 5000).await });
 
         let goal = TestGoal { order: 25 };
-        let mut goal_handle = client2.send_goal(goal).await?;
+        let goal_handle = client2.send_goal(goal).await?;
         let result = goal_handle.result().await?;
         assert_eq!(result.value, 500);
 

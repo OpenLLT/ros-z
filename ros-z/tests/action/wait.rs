@@ -87,7 +87,7 @@ mod tests {
         let goal = TestGoal { order: 5 };
 
         // Send a goal and wait for result with timeout
-        let mut goal_handle = client.send_goal(goal).await?;
+        let goal_handle = client.send_goal(goal).await?;
 
         // Try to get result with a short timeout - should timeout since no server is processing
         let result_future = goal_handle.result();
@@ -121,7 +121,7 @@ mod tests {
         let mut goal_handle = client.send_goal(goal).await?;
 
         // Test waiting for feedback
-        let mut feedback_stream = goal_handle.feedback_stream().unwrap();
+        let mut feedback_stream = goal_handle.feedback().unwrap();
         let feedback = time::timeout(Duration::from_millis(1000), feedback_stream.recv()).await?;
         let feedback = feedback.unwrap();
 
@@ -169,7 +169,7 @@ mod tests {
 
         // Spawn client task
         let client_task = tokio::spawn(async move {
-            let mut goal_handle = client_clone.send_goal(TestGoal { order: 10 }).await?;
+            let goal_handle = client_clone.send_goal(TestGoal { order: 10 }).await?;
             let result = goal_handle.result().await?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(result)
         });

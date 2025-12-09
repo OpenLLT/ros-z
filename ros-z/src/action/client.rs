@@ -4,9 +4,10 @@
 //! allowing nodes to send goals to action servers, receive feedback,
 //! monitor goal status, and retrieve results.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, oneshot, watch};
+use std::marker::PhantomData;
+use std::sync::Arc;
+use dashmap::DashMap;
+use tokio::sync::{mpsc, watch};
 
 use zenoh::Result;
 
@@ -19,6 +20,14 @@ use super::ZAction;
 
 use super::messages::*;
 use super::{GoalId, GoalInfo, GoalStatus};
+
+/// Type states for goal handles.
+pub mod goal_state {
+    /// The goal is active and can be monitored or canceled.
+    pub struct Active;
+    /// The goal has been terminated and cannot be used further.
+    pub struct Terminated;
+}
 
 /// Builder for creating an action client.
 ///
@@ -139,10 +148,9 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         }
         let cancel_client = cancel_client_builder.build()?;
 
-        let goal_board = Arc::new(Mutex::new(GoalBoard {
-            active_goals: HashMap::new(),
-            pending_goals: HashMap::new(),
-        }));
+        let goal_board = Arc::new(GoalBoard {
+            active_goals: DashMap::new(),
+        });
 
         // Create feedback subscriber with callback for direct message routing
         let mut feedback_sub_builder = self.node.create_sub_impl::<FeedbackMessage<A>>(&feedback_topic_name, None);
@@ -153,7 +161,7 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         let goal_board_feedback = goal_board.clone();
         let feedback_sub = feedback_sub_builder.build_with_callback(move |msg: FeedbackMessage<A>| {
             tracing::trace!("Feedback callback received for goal {:?}", msg.goal_id);
-            if let Some(channels) = goal_board_feedback.lock().unwrap().active_goals.get(&msg.goal_id) {
+            if let Some(channels) = goal_board_feedback.active_goals.get(&msg.goal_id) {
                 tracing::trace!("Routing feedback to goal {:?}", msg.goal_id);
                 let _ = channels.feedback_tx.send(msg.feedback);
             } else {
@@ -171,7 +179,7 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
         let status_sub = status_sub_builder.build_with_callback(move |msg: StatusMessage| {
             tracing::trace!("Status callback received with {} statuses", msg.status_list.len());
             for status_info in msg.status_list {
-                if let Some(channels) = goal_board_status.lock().unwrap().active_goals.get(&status_info.goal_info.goal_id) {
+                if let Some(channels) = goal_board_status.active_goals.get(&status_info.goal_info.goal_id) {
                     tracing::trace!("Routing status {:?} to goal {:?}", status_info.status, status_info.goal_info.goal_id);
                     let _ = channels.status_tx.send(status_info.status);
                 } else {
@@ -226,7 +234,7 @@ impl<'a, A: ZAction> Builder for ZActionClientBuilder<'a, A> {
 /// # let client = todo!();
 /// # let goal_handle = todo!();
 /// // Get feedback stream
-/// let mut feedback_rx = goal_handle.feedback_stream().unwrap();
+/// let mut feedback_rx = goal_handle.feedback().unwrap();
 ///
 /// // Process feedback in a separate task
 /// tokio::spawn(async move {
@@ -261,7 +269,7 @@ pub struct ZActionClient<A: ZAction> {
     cancel_client: Arc<crate::service::ZClient<CancelService>>,
     feedback_sub: Arc<crate::pubsub::ZSub<FeedbackMessage<A>, (), <FeedbackMessage<A> as ZMessage>::Serdes>>,
     status_sub: Arc<crate::pubsub::ZSub<StatusMessage, (), <StatusMessage as ZMessage>::Serdes>>,
-    goal_board: Arc<Mutex<GoalBoard<A>>>,
+    goal_board: Arc<GoalBoard<A>>,
 }
 
 impl<A: ZAction> Clone for ZActionClient<A> {
@@ -309,25 +317,26 @@ impl<A: ZAction> ZActionClient<A> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_goal(&self, goal: A::Goal) -> Result<GoalHandle<A>> {
+    pub async fn send_goal(&self, goal: A::Goal) -> Result<GoalHandle<A, goal_state::Active>> {
         let goal_id = GoalId::new();
 
         // 1. Create channels for this goal
         let (feedback_tx, feedback_rx) = mpsc::unbounded_channel();
         let (status_tx, status_rx) = watch::channel(GoalStatus::Unknown);
 
-        // 2. Store channels in goal board
-        {
-            let mut board = self.goal_board.lock().unwrap();
-            board.active_goals.insert(goal_id, GoalChannels {
-                feedback_tx,
-                status_tx,
-            });
-        }
+        // 2. Insert into board (Lock-Free)
+        self.goal_board.active_goals.insert(goal_id, GoalChannels {
+            feedback_tx,
+            status_tx,
+        });
 
         // 3. Send goal request via service client
         let request = GoalRequest { goal_id, goal };
-        self.goal_client.send_request(&request).await?;
+        if let Err(e) = self.goal_client.send_request(&request).await {
+            // Cleanup on send failure
+            self.goal_board.active_goals.remove(&goal_id);
+            return Err(e);
+        }
 
         // 4. Wait for response
         let sample = self.goal_client.rx.recv_async().await?;
@@ -336,17 +345,18 @@ impl<A: ZAction> ZActionClient<A> {
 
         // 5. Check if accepted
         if !response.accepted {
-            // Clean up channels
-            self.goal_board.lock().unwrap().active_goals.remove(&goal_id);
+            // Cleanup on rejection
+            self.goal_board.active_goals.remove(&goal_id);
             return Err(zenoh::Error::from("Goal rejected".to_string()));
         }
 
-        // 6. Return handle
+        // 6. Return typed handle in Active state
         Ok(GoalHandle {
             id: goal_id,
             client: Arc::new(self.clone()),
             feedback_rx: Some(feedback_rx),
             status_rx: Some(status_rx),
+            _state: PhantomData,
         })
     }
 
@@ -375,8 +385,7 @@ impl<A: ZAction> ZActionClient<A> {
     }
 
     pub fn feedback_stream(&self, goal_id: GoalId) -> Option<mpsc::UnboundedReceiver<A::Feedback>> {
-        let mut board = self.goal_board.lock().unwrap();
-        board.active_goals.get_mut(&goal_id).map(|channels| {
+        self.goal_board.active_goals.get_mut(&goal_id).map(|mut channels| {
             // Create new receiver (old one already taken via GoalHandle)
             let (tx, rx) = mpsc::unbounded_channel();
             channels.feedback_tx = tx;
@@ -385,8 +394,7 @@ impl<A: ZAction> ZActionClient<A> {
     }
 
     pub fn status_watch(&self, goal_id: GoalId) -> Option<watch::Receiver<GoalStatus>> {
-        let board = self.goal_board.lock().unwrap();
-        board.active_goals.get(&goal_id).map(|channels| {
+        self.goal_board.active_goals.get(&goal_id).map(|channels| {
             channels.status_tx.subscribe()
         })
     }
@@ -434,13 +442,13 @@ impl<A: ZAction> ZActionClient<A> {
     }
 }
 
-#[allow(dead_code)]
+/// The Goal Board (Lock-Free)
+///
+/// DashMap handles concurrent access safely and efficiently without blocking.
 struct GoalBoard<A: ZAction> {
-    active_goals: HashMap<GoalId, GoalChannels<A>>,
-    pending_goals: HashMap<i64, oneshot::Sender<GoalResponse>>,
+    active_goals: DashMap<GoalId, GoalChannels<A>>,
 }
 
-#[allow(dead_code)]
 struct GoalChannels<A: ZAction> {
     feedback_tx: mpsc::UnboundedSender<A::Feedback>,
     status_tx: watch::Sender<GoalStatus>,
@@ -452,25 +460,29 @@ struct GoalChannels<A: ZAction> {
 /// It provides methods to monitor the goal's status, receive feedback, retrieve results,
 /// and cancel the goal.
 ///
+/// The handle uses a type-state pattern to ensure goals cannot be misused:
+/// - `GoalHandle<A, goal_state::Active>` - Can be monitored, cancelled, or consumed for result
+/// - `GoalHandle<A, goal_state::Terminated>` - Read-only access after completion
+///
 /// # Examples
 ///
 /// ```no_run
 /// # use ros_z::action::*;
 /// # #[tokio::main]
 /// # async fn main() -> Result<()> {
-/// # let goal_handle = todo!();
+/// # let mut goal_handle = todo!();
 /// // Monitor status
 /// let mut status_watch = goal_handle.status_watch().unwrap();
 /// while let Ok(()) = status_watch.changed().await {
 ///     println!("Status: {:?}", *status_watch.borrow());
 /// }
 ///
-/// // Get result
+/// // Get result (consumes the handle)
 /// let result = goal_handle.result().await?;
 /// # Ok(())
 /// # }
 /// ```
-pub struct GoalHandle<A: ZAction> {
+pub struct GoalHandle<A: ZAction, State = goal_state::Active> {
     /// Unique identifier for this goal.
     id: GoalId,
     /// Reference to the client that sent this goal.
@@ -479,9 +491,12 @@ pub struct GoalHandle<A: ZAction> {
     feedback_rx: Option<mpsc::UnboundedReceiver<A::Feedback>>,
     /// Receiver for status updates.
     status_rx: Option<watch::Receiver<GoalStatus>>,
+    /// Type-state marker
+    _state: PhantomData<State>,
 }
 
-impl<A: ZAction> GoalHandle<A> {
+// --- Active State Methods ---
+impl<A: ZAction> GoalHandle<A, goal_state::Active> {
     /// Returns the unique identifier for this goal.
     ///
     /// # Returns
@@ -491,19 +506,42 @@ impl<A: ZAction> GoalHandle<A> {
         self.id
     }
 
-    pub fn feedback_stream(&mut self) -> Option<mpsc::UnboundedReceiver<A::Feedback>> {
+    /// Takes ownership of the feedback receiver.
+    ///
+    /// Returns `Some` the first time it's called, `None` afterwards.
+    pub fn feedback(&mut self) -> Option<mpsc::UnboundedReceiver<A::Feedback>> {
         self.feedback_rx.take()
     }
 
+    /// Takes ownership of the status watcher.
+    ///
+    /// Returns `Some` the first time it's called, `None` afterwards.
     pub fn status_watch(&mut self) -> Option<watch::Receiver<GoalStatus>> {
         self.status_rx.take()
     }
 
-    pub async fn result(&mut self) -> Result<A::Result> {
-        // First, wait for the goal to reach a terminal state
-        if let Some(mut status_rx) = self.status_rx.take() {
+    /// Requests cancellation of this goal.
+    ///
+    /// # Returns
+    ///
+    /// The cancellation response from the server.
+    pub async fn cancel(&self) -> Result<CancelGoalResponse> {
+        self.client.cancel_goal(self.id).await
+    }
+
+    /// Consumes the Active handle to prevent reuse.
+    ///
+    /// Waits for the goal to reach a terminal state, fetches the result,
+    /// and cleans up the goal from the board. This is crucial for memory safety.
+    ///
+    /// # Returns
+    ///
+    /// The result of the action once it completes.
+    pub async fn result(mut self) -> Result<A::Result> {
+        // 1. Wait for Terminal Status
+        if let Some(mut rx) = self.status_rx.take() {
             loop {
-                let status = *status_rx.borrow_and_update();
+                let status = *rx.borrow_and_update();
 
                 // Check if we're in a terminal state
                 if status.is_terminal() {
@@ -511,18 +549,28 @@ impl<A: ZAction> GoalHandle<A> {
                 }
 
                 // Wait for status change
-                if status_rx.changed().await.is_err() {
+                if rx.changed().await.is_err() {
                     tracing::warn!("Status channel closed before reaching terminal state");
                     break;
                 }
             }
         }
 
-        // Now request the result
-        self.client.get_result(self.id).await
-    }
+        // 2. Fetch Result
+        let res = self.client.get_result(self.id).await;
 
-    pub async fn cancel(&self) -> Result<CancelGoalResponse> {
-        self.client.cancel_goal(self.id).await
+        // 3. Cleanup Board (Crucial for Memory Safety)
+        self.client.goal_board.active_goals.remove(&self.id);
+
+        res
+    }
+}
+
+// Deprecated aliases for backwards compatibility
+impl<A: ZAction> GoalHandle<A, goal_state::Active> {
+    /// Deprecated: Use `feedback()` instead.
+    #[deprecated(note = "Use `feedback()` instead")]
+    pub fn feedback_stream(&mut self) -> Option<mpsc::UnboundedReceiver<A::Feedback>> {
+        self.feedback()
     }
 }

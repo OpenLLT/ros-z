@@ -122,7 +122,7 @@ mod tests {
         });
 
         let goal = TestGoal { order: 5 };
-        let mut goal_handle = client.send_goal(goal).await?;
+        let goal_handle = client.send_goal(goal).await?;
         let result = goal_handle.result().await?;
 
         assert_eq!(result.value, 42);
